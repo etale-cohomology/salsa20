@@ -81,7 +81,7 @@ void s20_show(u32 x[16], char* msg){
 #define RL( x,r)            (((x)<<(r)) | ((x)>>(32-(r))))      // rotl (out of place)
 #define MOD(x,n)            (0<=(x) ? (x)%(n) : (n)+((x)%(n)))  // mod with number-theoretic wraparound (out of place)
 #define RA(x, i,j, r)       RL(ADD(x[i],x[j]), r)               // add-rotl (out of place)
-#define XRA(x, i,l,r, rot)  XOR(x[r], RL(ADD(x[i],x[l]),rot))   // add-rotl-xor (out of place)
+#define XRA(x, i,p,n, rot)  XOR(x[n], RL(ADD(x[i],x[p]),rot))   // add-rotl-xor (out of place)
 
 #define N        (4)
 #define COLP(l)  MOD(l-N,N*N)                // prev col, @l is the LINEAR index (ie. RCOLS*row + col)
@@ -90,8 +90,10 @@ void s20_show(u32 x[16], char* msg){
 #define ROWN(l)  (MOD(l+1,N) + (N*((l)/N)))  // next row, @l is the LINEAR index (ie. RCOLS*row + col)
 #define TR(l)    (N*((l)%N) + ((l)/N))       // transpose l-index. Eg. for N==4 and the (i,j) n-index (1,3), the transpose is n-index (3,1), so its l-index 4*1+3 gets mapped to 4*3+1
 
-#define QC(x, l,rot)  x[COLN(l)] = XOR(x[COLN(l)], RL(ADD(x[l],x[COLP(l)]), rot))  // quarterround, column-major (in place)
-#define QR(x, l,rot)  x[ROWN(l)] = XOR(x[ROWN(l)], RL(ADD(x[l],x[ROWP(l)]), rot))  // quarterround, row   -major (in place)
+// #define QC(x, l,rot)  x[COLN(l)] = XOR(x[COLN(l)], RL(ADD(x[l],x[COLP(l)]), rot))  // quarterround, column-major (in place)
+// #define QR(x, l,rot)  x[ROWN(l)] = XOR(x[ROWN(l)], RL(ADD(x[l],x[ROWP(l)]), rot))  // quarterround, row   -major (in place)
+#define QC(x, l,rot)  x[COLN(l)] = XRA(x, l,COLP(l),COLN(l), rot)  // quarterround, column-major (in place)
+#define QR(x, l,rot)  x[ROWN(l)] = XRA(x, l,ROWP(l),ROWN(l), rot)  // quarterround, row   -major (in place)
 
 static const u32 S20_CONSTANTS[N] = {0x61707865,0x3320646e,0x79622d32,0x6b206574};  // constants for the 256-bit-key version
 
@@ -196,6 +198,16 @@ void s20_blk(u32 in[N*N], u32 out[N*N]){
 #endif
 
 #if 1  // a salsa20 block implementation
+// row-major indexing:
+//   00 01 02 03
+//   04 05 06 07
+//   08 09 0a 0b
+//   0c 0d 0e 0f
+// col-major indexing:
+//   00 04 08 0c
+//   01 05 09 0d
+//   02 06 0a 0e
+//   03 07 0b 0f
 void s20_blk(u32 in[N*N], u32 out[N*N]){
   u32 x[N*N];
   for(int i=0; i<N*N; ++i)  x[i] = in[i];
@@ -209,6 +221,25 @@ void s20_blk(u32 in[N*N], u32 out[N*N]){
     QR(x,0x1,0x09); QR(x,0x6,0x09); QR(x,0xb,0x09); QR(x,0xc,0x09);
     QR(x,0x2,0x0d); QR(x,0x7,0x0d); QR(x,0x8,0x0d); QR(x,0xd,0x0d);
     QR(x,0x3,0x12); QR(x,0x4,0x12); QR(x,0x9,0x12); QR(x,0xe,0x12);
+  }
+  for(int i=0; i<N*N; ++i)  out[i] = in[i] + x[i];
+}
+#endif
+
+#if 0  // a salsa20 block implementation
+void s20_blk(u32 in[N*N], u32 out[N*N]){
+  u32 x[N*N];
+  for(int i=0; i<N*N; ++i)  x[i] = in[i];
+  for(int i=0; i<0x14; i+=2){
+    QC(x,(0x0*N + 0x0*(N+1)) % (N*N),0x07);  QC(x,(0x0*N + 0x1*(N+1)) % (N*N),0x07);  QC(x,(0x0*N + 0x2*(N+1)) % (N*N),0x07);  QC(x,(0x0*N + 0x3*(N+1)) % (N*N),0x07);
+    QC(x,(0x1*N + 0x0*(N+1)) % (N*N),0x09);  QC(x,(0x1*N + 0x1*(N+1)) % (N*N),0x09);  QC(x,(0x1*N + 0x2*(N+1)) % (N*N),0x09);  QC(x,(0x1*N + 0x3*(N+1)) % (N*N),0x09);
+    QC(x,(0x2*N + 0x0*(N+1)) % (N*N),0x0d);  QC(x,(0x2*N + 0x1*(N+1)) % (N*N),0x0d);  QC(x,(0x2*N + 0x2*(N+1)) % (N*N),0x0d);  QC(x,(0x2*N + 0x3*(N+1)) % (N*N),0x0d);
+    QC(x,(0x3*N + 0x0*(N+1)) % (N*N),0x12);  QC(x,(0x3*N + 0x1*(N+1)) % (N*N),0x12);  QC(x,(0x3*N + 0x2*(N+1)) % (N*N),0x12);  QC(x,(0x3*N + 0x3*(N+1)) % (N*N),0x12);
+
+    QR(x,TR((0x0*N + 0x0*(N+1)) % (N*N)),0x07);  QR(x,TR((0x0*N + 0x1*(N+1)) % (N*N)),0x07);  QR(x,TR((0x0*N + 0x2*(N+1)) % (N*N)),0x07);  QR(x,TR((0x0*N + 0x3*(N+1)) % (N*N)),0x07);
+    QR(x,TR((0x1*N + 0x0*(N+1)) % (N*N)),0x09);  QR(x,TR((0x1*N + 0x1*(N+1)) % (N*N)),0x09);  QR(x,TR((0x1*N + 0x2*(N+1)) % (N*N)),0x09);  QR(x,TR((0x1*N + 0x3*(N+1)) % (N*N)),0x09);
+    QR(x,TR((0x2*N + 0x0*(N+1)) % (N*N)),0x0d);  QR(x,TR((0x2*N + 0x1*(N+1)) % (N*N)),0x0d);  QR(x,TR((0x2*N + 0x2*(N+1)) % (N*N)),0x0d);  QR(x,TR((0x2*N + 0x3*(N+1)) % (N*N)),0x0d);
+    QR(x,TR((0x3*N + 0x0*(N+1)) % (N*N)),0x12);  QR(x,TR((0x3*N + 0x1*(N+1)) % (N*N)),0x12);  QR(x,TR((0x3*N + 0x2*(N+1)) % (N*N)),0x12);  QR(x,TR((0x3*N + 0x3*(N+1)) % (N*N)),0x12);
   }
   for(int i=0; i<N*N; ++i)  out[i] = in[i] + x[i];
 }
@@ -278,7 +309,7 @@ void s20_encrypt(u32 sk[N*N/2],u32 nonce[(N*N - N*N/2 - N)/2], i64 bdim,void* pt
 
     // 3) encrypt @ptxt
     for(int i=0; i<m_min(4*N*N,bdim); ++i)  ctxt8[i] = ptxt8[i] ^ out8[i];
-    s20_show((u32*)ctxt8, "ctxt");
+    s20_show((u32*)ctxt8, "ctxt");  // NOTE! if @bdim is under 4*N*N, the extra bytes are invalid, so we're reading out-of-bounds mem. but i'll allow it
     putchar(0x0a);
   }
 }
@@ -308,12 +339,13 @@ int main(int nargs, char* args[]){
   m_sep(); puts("\x1b[91mencipher \x1b[0m(each 32-bit word is rendered as a big-endian base16 integer: most-significant nibble/digit first)\n");
   s20_encrypt(SK,nonce, i_stat.st_size,i_data,y);  // encrypt
 
-  printf("\x1b[31msk   \x1b[91m:\x1b[0m");  m_fori(i, 0,sizeof(SK)   /4) printf(" 0x%s", fmtu32hbe(SK   [i]));  putchar(0x0a);  // secret key
-  printf("\x1b[32mnonce\x1b[91m:\x1b[0m");  m_fori(i, 0,sizeof(nonce)/4) printf(" 0x%s", fmtu32hbe(nonce[i]));  putchar(0x0a);  // nonce
-  printf("\x1b[94mptxt \x1b[91m:\x1b[0m");  printf(" %s\n",i_data);                                                             // "plaintext"  (just the input  to the salsa enciphering/deciphering function (it's the same function to encipher or decipher); it's the plaintext  if enciphering, and it's ciphertext    if deciphering)
-  printf("\x1b[35mctxt \x1b[91m:\x1b[0m");  m_fori(i, 0,i_stat.st_size         /4) printf(" 0x%s", fmtu32hbe(y[i]));      putchar(0x0a);  // "ciphertext" (just the output of the salso enciphering/deciphering function (it's the same function to encipher or decipher); it's the ciphertext if enciphering, and it's the plaintext if deciphering)
+  printf("\x1b[31msk   \x1b[91m:\x1b[0m");  m_fori(i, 0,sizeof(SK)    /4) printf(" 0x%s", fmtu32hbe(SK   [i]));  putchar(0x0a);  // secret key
+  printf("\x1b[32mnonce\x1b[91m:\x1b[0m");  m_fori(i, 0,sizeof(nonce) /4) printf(" 0x%s", fmtu32hbe(nonce[i]));  putchar(0x0a);  // nonce
+  printf("\x1b[94mptxt \x1b[91m:\x1b[0m");  printf(" %s\n",i_data);                                                              // "plaintext"  (just the input  to the salsa enciphering/deciphering function (it's the same function to encipher or decipher); it's the plaintext  if enciphering, and it's ciphertext    if deciphering)
+  printf("\x1b[35mctxt \x1b[91m:\x1b[0m");  m_fori(i, 0,i_stat.st_size/4) printf(" 0x%s", fmtu32hbe(y[i]));      putchar(0x0a);  // "ciphertext" (just the output of the salso enciphering/deciphering function (it's the same function to encipher or decipher); it's the ciphertext if enciphering, and it's the plaintext if deciphering)
 
   // ----------------------------------------------------------------
+#if 1  // enable this to write the nonce+ciphertext to a file (in mixed ascii/rawbin format)
   char o_path[PATH_MAX]={0x00};  snprintf(o_path,sizeof(o_path)-1, "data_%s.s20", datestr());
   int  o_fd = open(o_path, O_RDWR|O_CREAT, 0b110110000);  m_chks(o_fd);
   m_chks(ftruncate(o_fd, 7+sizeof(nonce)+1 + 7+i_stat.st_size+1));
@@ -321,9 +353,10 @@ int main(int nargs, char* args[]){
   m_chks(close(o_fd));
 
   void* o_pos = o_data;
-  mmap_write(7,"nonce: ", o_pos);  mmap_write(sizeof(nonce),nonce, o_pos);  *(u8*)o_pos='\n'; o_pos+=1;  // nonce       // mmap_write(6,"nonce:", o_pos);  m_fori(i, 0,sizeof(nonce)/4){  mmap_write(3," 0x", o_pos); *(u64*)o_pos = *(u64*)fmtu32hbe(nonce[i]); o_pos+=8;  }  mmap_write(1,"\n", o_pos);  // nonce
-  mmap_write(7,"ctxt : ", o_pos);  mmap_write(i_stat.st_size,         y,     o_pos);  *(u8*)o_pos='\n'; o_pos+=1;  // ciphertext  // mmap_write(6,"ctxt :", o_pos);  m_fori(i, 0,i_stat.st_size         /4){  mmap_write(3," 0x", o_pos); *(u64*)o_pos = *(u64*)fmtu32hbe(y    [i]); o_pos+=8;  }  mmap_write(1,"\n", o_pos);  // ciphertext
+  mmap_write(7,"nonce: ", o_pos);  mmap_write(sizeof(nonce), nonce, o_pos);  *(u8*)o_pos='\n'; o_pos+=1;  // nonce       // mmap_write(6,"nonce:", o_pos);  m_fori(i, 0,sizeof(nonce) /4){  mmap_write(3," 0x", o_pos); *(u64*)o_pos = *(u64*)fmtu32hbe(nonce[i]); o_pos+=8;  }  mmap_write(1,"\n", o_pos);  // nonce
+  mmap_write(7,"ctxt : ", o_pos);  mmap_write(i_stat.st_size,    y, o_pos);  *(u8*)o_pos='\n'; o_pos+=1;  // ciphertext  // mmap_write(6,"ctxt :", o_pos);  m_fori(i, 0,i_stat.st_size/4){  mmap_write(3," 0x", o_pos); *(u64*)o_pos = *(u64*)fmtu32hbe(y    [i]); o_pos+=8;  }  mmap_write(1,"\n", o_pos);  // ciphertext
   m_chks(munmap(o_data,i_stat.st_size));
+#endif
 
   // ----------------------------------------------------------------
 #if 1  // enable this to decrypt
@@ -332,9 +365,9 @@ int main(int nargs, char* args[]){
   m_sep(); puts("\x1b[91mdecipher \x1b[0m(each 32-bit word is rendered as a big-endian base16 integer: most-significant nibble/digit first)\n");
   s20_encrypt(SK,nonce, i_stat.st_size,y,z);  // decrypt
 
-  printf("\x1b[31msk   \x1b[91m:\x1b[0m");  m_fori(i, 0,sizeof(SK)   /4) printf(" 0x%s", fmtu32hbe(SK   [i]));  putchar(0x0a);
-  printf("\x1b[32mnonce\x1b[91m:\x1b[0m");  m_fori(i, 0,sizeof(nonce)/4) printf(" 0x%s", fmtu32hbe(nonce[i]));  putchar(0x0a);
-  printf("\x1b[94mptxt \x1b[91m:\x1b[0m");  m_fori(i, 0,i_stat.st_size         /4) printf(" 0x%s", fmtu32hbe(y    [i]));  putchar(0x0a);
+  printf("\x1b[31msk   \x1b[91m:\x1b[0m");  m_fori(i, 0,sizeof(SK)    /4) printf(" 0x%s", fmtu32hbe(SK   [i]));  putchar(0x0a);
+  printf("\x1b[32mnonce\x1b[91m:\x1b[0m");  m_fori(i, 0,sizeof(nonce) /4) printf(" 0x%s", fmtu32hbe(nonce[i]));  putchar(0x0a);
+  printf("\x1b[94mptxt \x1b[91m:\x1b[0m");  m_fori(i, 0,i_stat.st_size/4) printf(" 0x%s", fmtu32hbe(y    [i]));  putchar(0x0a);
   printf("\x1b[35mctxt \x1b[91m:\x1b[0m");  printf(" %s\n",z);  // m_fori(i, 0,i_stat.st_size/4) printf(" %s", fmtu32hbe(((u32*)x)[i]));  putchar(0x0a);
 #endif
 
