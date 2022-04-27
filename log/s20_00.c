@@ -18,8 +18,6 @@ git push --set-upstream origin master -f
 #include <errno.h>     // @errno
 #include <limits.h>    // @PATH_MAX
 #include <sys/mman.h>  // @mmap()
-#include <sys/stat.h>  // @fstat()
-#include <stdlib.h>    // @malloc()
 
 // ----------------------------------------------------------------------------------------------------------------------------#
 /* @blk1  libtype */
@@ -294,50 +292,49 @@ int main(int nargs, char* args[]){
   u64 eps = 1000000000ull*ep.tv_sec + ep.tv_nsec;
   nonce[0x0] = eps>>0x00 & 0xffffffff;
   nonce[0x1] = eps>>0x20 & 0xffffffff;
-#else  // 1) manual nonce
+#endif
+#if 0  // 1) manual nonce
   nonce[0x00] = 0x00000001;
   nonce[0x01] = 0x00000000;
 #endif
 
-  int    i_fd = open("msg.txt",O_RDONLY);  m_chks(i_fd);
-  struct stat i_stat; fstat(i_fd,&i_stat);
-  void*  i_data = mmap(NULL,i_stat.st_size, PROT_READ,MAP_SHARED, i_fd,0);
-
-  u32* y = malloc(i_stat.st_size);
+  char* msg = "In the beginning was the Word, and the Word was with God, and the Word was God.";
+  i64 bdim = 0x80;  // we encipher 2 512-bit blocks, just to test multi-block enciphering/deciphering
+  u32 x[bdim]; memset(x,0x00,bdim);
+  u32 y[bdim]; memset(y,0x00,bdim);
+  memcpy(x, msg,strlen(msg));
 
   m_sep(); puts("\x1b[91mencipher \x1b[0m(each 32-bit word is rendered as a big-endian base16 integer: most-significant nibble/digit first)\n");
-  s20_encrypt(SK,nonce, i_stat.st_size,i_data,y);  // encrypt
+  s20_encrypt(SK,nonce, bdim,x,y);  // encrypt
 
   printf("\x1b[31msk   \x1b[91m:\x1b[0m");  m_fori(i, 0,sizeof(SK)   /4) printf(" 0x%s", fmtu32hbe(SK   [i]));  putchar(0x0a);  // secret key
   printf("\x1b[32mnonce\x1b[91m:\x1b[0m");  m_fori(i, 0,sizeof(nonce)/4) printf(" 0x%s", fmtu32hbe(nonce[i]));  putchar(0x0a);  // nonce
-  printf("\x1b[94mptxt \x1b[91m:\x1b[0m");  printf(" %s\n",i_data);                                                             // "plaintext"  (just the input  to the salsa enciphering/deciphering function (it's the same function to encipher or decipher); it's the plaintext  if enciphering, and it's ciphertext    if deciphering)
-  printf("\x1b[35mctxt \x1b[91m:\x1b[0m");  m_fori(i, 0,i_stat.st_size         /4) printf(" 0x%s", fmtu32hbe(y[i]));      putchar(0x0a);  // "ciphertext" (just the output of the salso enciphering/deciphering function (it's the same function to encipher or decipher); it's the ciphertext if enciphering, and it's the plaintext if deciphering)
+  printf("\x1b[94mptxt \x1b[91m:\x1b[0m");  printf(" %s\n",x);                                                                  // "plaintext"  (just the input  to the salsa enciphering/deciphering function (it's the same function to encipher or decipher); it's the plaintext  if enciphering, and it's ciphertext    if deciphering)
+  printf("\x1b[35mctxt \x1b[91m:\x1b[0m");  m_fori(i, 0,bdim         /4) printf(" 0x%s", fmtu32hbe(y[i]));      putchar(0x0a);  // "ciphertext" (just the output of the salso enciphering/deciphering function (it's the same function to encipher or decipher); it's the ciphertext if enciphering, and it's the plaintext if deciphering)
 
   // ----------------------------------------------------------------
   char o_path[PATH_MAX]={0x00};  snprintf(o_path,sizeof(o_path)-1, "data_%s.s20", datestr());
   int  o_fd = open(o_path, O_RDWR|O_CREAT, 0b110110000);  m_chks(o_fd);
-  m_chks(ftruncate(o_fd, 7+sizeof(nonce)+1 + 7+i_stat.st_size+1));
-  void* o_data = mmap(NULL,i_stat.st_size, PROT_READ|PROT_WRITE,MAP_SHARED, o_fd,0);  m_chks(o_data);
+  m_chks(ftruncate(o_fd,  6 + sizeof(nonce)/4*(3+8) + 1 +  6 + bdim/4*(3+8) + 1));
+  void* o_data = mmap(NULL,bdim, PROT_READ|PROT_WRITE,MAP_SHARED, o_fd,0);  m_chks(o_data);
   m_chks(close(o_fd));
 
   void* o_pos = o_data;
-  mmap_write(7,"nonce: ", o_pos);  mmap_write(sizeof(nonce),nonce, o_pos);  *(u8*)o_pos='\n'; o_pos+=1;  // nonce       // mmap_write(6,"nonce:", o_pos);  m_fori(i, 0,sizeof(nonce)/4){  mmap_write(3," 0x", o_pos); *(u64*)o_pos = *(u64*)fmtu32hbe(nonce[i]); o_pos+=8;  }  mmap_write(1,"\n", o_pos);  // nonce
-  mmap_write(7,"ctxt : ", o_pos);  mmap_write(i_stat.st_size,         y,     o_pos);  *(u8*)o_pos='\n'; o_pos+=1;  // ciphertext  // mmap_write(6,"ctxt :", o_pos);  m_fori(i, 0,i_stat.st_size         /4){  mmap_write(3," 0x", o_pos); *(u64*)o_pos = *(u64*)fmtu32hbe(y    [i]); o_pos+=8;  }  mmap_write(1,"\n", o_pos);  // ciphertext
-  m_chks(munmap(o_data,i_stat.st_size));
+  mmap_write(6,"nonce:", o_pos);  m_fori(i, 0,sizeof(nonce)/4){  mmap_write(3," 0x", o_pos); *(u64*)o_pos = *(u64*)fmtu32hbe(nonce[i]); o_pos+=8;  }  mmap_write(1,"\n", o_pos);  // nonce
+  mmap_write(6,"ctxt :", o_pos);  m_fori(i, 0,bdim         /4){  mmap_write(3," 0x", o_pos); *(u64*)o_pos = *(u64*)fmtu32hbe(y    [i]); o_pos+=8;  }  mmap_write(1,"\n", o_pos);  // ciphertext
+  
+  m_chks(munmap(o_data,bdim));
 
   // ----------------------------------------------------------------
 #if 1  // enable this to decrypt
-  u32* z = malloc(i_stat.st_size);
+  u8 z[bdim]; memset(z,0x00,bdim);
 
   m_sep(); puts("\x1b[91mdecipher \x1b[0m(each 32-bit word is rendered as a big-endian base16 integer: most-significant nibble/digit first)\n");
-  s20_encrypt(SK,nonce, i_stat.st_size,y,z);  // decrypt
+  s20_encrypt(SK,nonce, bdim,y,z);  // decrypt
 
   printf("\x1b[31msk   \x1b[91m:\x1b[0m");  m_fori(i, 0,sizeof(SK)   /4) printf(" 0x%s", fmtu32hbe(SK   [i]));  putchar(0x0a);
   printf("\x1b[32mnonce\x1b[91m:\x1b[0m");  m_fori(i, 0,sizeof(nonce)/4) printf(" 0x%s", fmtu32hbe(nonce[i]));  putchar(0x0a);
-  printf("\x1b[94mptxt \x1b[91m:\x1b[0m");  m_fori(i, 0,i_stat.st_size         /4) printf(" 0x%s", fmtu32hbe(y    [i]));  putchar(0x0a);
-  printf("\x1b[35mctxt \x1b[91m:\x1b[0m");  printf(" %s\n",z);  // m_fori(i, 0,i_stat.st_size/4) printf(" %s", fmtu32hbe(((u32*)x)[i]));  putchar(0x0a);
+  printf("\x1b[94mptxt \x1b[91m:\x1b[0m");  m_fori(i, 0,bdim         /4) printf(" 0x%s", fmtu32hbe(y    [i]));  putchar(0x0a);
+  printf("\x1b[35mctxt \x1b[91m:\x1b[0m");  printf(" %s\n",x);  // m_fori(i, 0,bdim/4) printf(" %s", fmtu32hbe(((u32*)x)[i]));  putchar(0x0a);
 #endif
-
-  // ----------------------------------------------------------------
-  free(y);
 }
